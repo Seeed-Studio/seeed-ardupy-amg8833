@@ -1,0 +1,8 @@
+{
+    "name": "Seeed ArduPy ANG8833",
+    "version": "1.0.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Seeed-Studio/seeed-ardupy-amg8833.git"
+    }
+}
