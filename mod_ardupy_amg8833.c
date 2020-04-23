@@ -31,8 +31,6 @@
 #include "py/obj.h"
 #include "shared-bindings/util.h"
 
-#define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
-
 void common_hal_amg8833_thermal_construct(abstract_module_t *self);
 void common_hal_amg8833_thermal_deinit(abstract_module_t *self);
 int common_hal_amg8833_thermal_set_upper_limit(abstract_module_t *self, uint8_t *value);
@@ -47,105 +45,128 @@ int common_hal_amg8833_thermal_read_pixel_temperature(abstract_module_t *self, f
 int common_hal_amg8833_thermal_get_interrupt_status(abstract_module_t *self);
 int common_hal_amg8833_thermal_read_pixels_interrupt_status(abstract_module_t *self, uint8_t *status);
 int common_hal_amg8833_thermal_read_pixel_temperature_reg_value(abstract_module_t *self, uint16_t *value);
+int common_hal_amg8833_thermal_read_pixel_temperature_scale(abstract_module_t *self, float *pixel_date,int width, int height);
 
 extern const mp_obj_type_t grove_amg8833_thermal_type;
 
-#define MinTemp 25
-#define MaxTemp 35
 
-static float a;
-static float b;
-static float c;
-static float d;
-static uint8_t red;
-static uint8_t green;
-static uint8_t blue;
 
-static void Getabcd()
-{
-    a = MinTemp + (MaxTemp - MinTemp) * 0.2121;
-    b = MinTemp + (MaxTemp - MinTemp) * 0.3182;
-    c = MinTemp + (MaxTemp - MinTemp) * 0.4242;
-    d = MinTemp + (MaxTemp - MinTemp) * 0.8182;
-}
 
-static uint16_t color565(uint8_t r, uint8_t g, uint8_t b)
-{
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
+float get_point(float* p, uint8_t rows, uint8_t cols, int8_t x, int8_t y);
+void set_point(float* p, uint8_t rows, uint8_t cols, int8_t x, int8_t y, float f);
+void get_adjacents_1d(float* src, float* dest, uint8_t rows, uint8_t cols, int8_t x, int8_t y);
+void get_adjacents_2d(float* src, float* dest, uint8_t rows, uint8_t cols, int8_t x, int8_t y);
+float cubicInterpolate(float p[], float x);
+float bicubicInterpolate(float p[], float x, float y);
+void interpolate_image(float* src, uint8_t src_rows, uint8_t src_cols,
+                       float* dest, uint8_t dest_rows, uint8_t dest_cols);
 
-static uint16_t GetColor(float val)
-{
-
-    red = constrain(255.0 / (c - b) * val - ((b * 255.0) / (c - b)), 0, 255);
-
-    if ((val > MinTemp) & (val < a))
-    {
-        green = constrain(255.0 / (a - MinTemp) * val - (255.0 * MinTemp) / (a - MinTemp), 0, 255);
-    }
-    else if ((val >= a) & (val <= c))
-    {
-        green = 255;
-    }
-    else if (val > c)
-    {
-        green = constrain(255.0 / (c - d) * val - (d * 255.0) / (c - d), 0, 255);
-    }
-    else if ((val > d) | (val < a))
-    {
-        green = 0;
-    }
-
-    if (val <= b)
-    {
-        blue = constrain(255.0 / (a - b) * val - (255.0 * b) / (a - b), 0, 255);
-    }
-    else if ((val > b) & (val <= d))
-    {
-        blue = 0;
-    }
-    else if (val > d)
-    {
-        blue = constrain(240.0 / (MaxTemp - d) * val - (d * 240.0) / (MaxTemp - d), 0, 240);
-    }
-
-    // use the displays color mapping function to get 5-6-5 color palet (R=5 bits, G=6 bits, B-5 bits)
-    return color565(red, green, blue);
-}
-
-void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color, uint8_t *data)
-{
-     if ((x >= 200) || (y >= 200)) {
-        return;
-    }
-
+float get_point(float* p, uint8_t rows, uint8_t cols, int8_t x, int8_t y) {
     if (x < 0) {
-        w += x;
         x = 0;
     }
     if (y < 0) {
-        h += y;
         y = 0;
     }
-
-    if ((x + w) > 200) {
-        w = 200  - x;
+    if (x >= cols) {
+        x = cols - 1;
     }
-    if ((y + h) > 200) {
-        h = 200 - y;
+    if (y >= rows) {
+        y = rows - 1;
     }
+    return p[y * cols + x];
+}
 
-    if ((w < 1) || (h < 1)) {
+void set_point(float* p, uint8_t rows, uint8_t cols, int8_t x, int8_t y, float f) {
+    if ((x < 0) || (x >= cols)) {
         return;
     }
-    int32_t yp = 200 * y + x;
-    color = (color & 0xE000) >> 8 | (color & 0x0700) >> 6 | (color & 0x0018) >> 3;
-    while (h--)
-    {
-        //memset(data + yp, (uint8_t)color, w);
-        yp += 200;
+    if ((y < 0) || (y >= rows)) {
+        return;
+    }
+    p[y * cols + x] = f;
+}
+
+// src is a grid src_rows * src_cols
+// dest is a pre-allocated grid, dest_rows*dest_cols
+void interpolate_image(float* src, uint8_t src_rows, uint8_t src_cols,
+                       float* dest, uint8_t dest_rows, uint8_t dest_cols) {
+    float mu_x = (src_cols - 1.0) / (dest_cols - 1.0);
+    float mu_y = (src_rows - 1.0) / (dest_rows - 1.0);
+
+    float adj_2d[16]; // matrix for storing adjacents
+
+    for (uint8_t y_idx = 0; y_idx < dest_rows; y_idx++) {
+        for (uint8_t x_idx = 0; x_idx < dest_cols; x_idx++) {
+            float x = x_idx * mu_x;
+            float y = y_idx * mu_y;
+            //  Serial.print("("); Serial.print(y_idx); Serial.print(", "); Serial.print(x_idx); Serial.print(") = ");
+            //  Serial.print("("); Serial.print(y); Serial.print(", "); Serial.print(x); Serial.print(") = ");
+            get_adjacents_2d(src, adj_2d, src_rows, src_cols, x, y);
+
+            //  Serial.print("[");
+            //  for (uint8_t i=0; i<16; i++) {
+            //    Serial.print(adj_2d[i]); Serial.print(", ");
+            //  }
+            //  Serial.println("]");
+
+            float frac_x = x - (int)x; // we only need the ~delta~ between the points
+            float frac_y = y - (int)y; // we only need the ~delta~ between the points
+            float out = bicubicInterpolate(adj_2d, frac_x, frac_y);
+            //  Serial.print("\tInterp: "); Serial.println(out);
+            set_point(dest, dest_rows, dest_cols, x_idx, y_idx, out);
+        }
     }
 }
+
+// p is a list of 4 points, 2 to the left, 2 to the right
+float cubicInterpolate(float p[], float x) {
+    float r = p[1] + (0.5 * x * (p[2] - p[0] + x * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3] + x * (3.0 *
+                                 (p[1] - p[2]) + p[3] - p[0]))));
+
+    // Serial.print("interpolating: [");
+    // Serial.print(p[0],2); Serial.print(", ");
+    // Serial.print(p[1],2); Serial.print(", ");
+    // Serial.print(p[2],2); Serial.print(", ");
+    // Serial.print(p[3],2); Serial.print("] w/"); Serial.print(x); Serial.print(" = ");
+    // Serial.println(r);
+
+    return r;
+}
+
+// p is a 16-point 4x4 array of the 2 rows & columns left/right/above/below
+float bicubicInterpolate(float p[], float x, float y) {
+    float arr[4] = {0, 0, 0, 0};
+    arr[0] = cubicInterpolate(p + 0, x);
+    arr[1] = cubicInterpolate(p + 4, x);
+    arr[2] = cubicInterpolate(p + 8, x);
+    arr[3] = cubicInterpolate(p + 12, x);
+    return cubicInterpolate(arr, y);
+}
+
+// src is rows*cols and dest is a 4-point array passed in already allocated!
+void get_adjacents_1d(float* src, float* dest, uint8_t rows, uint8_t cols, int8_t x, int8_t y) {
+    // Serial.print("("); Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println(")");
+    // pick two items to the left
+    dest[0] = get_point(src, rows, cols, x - 1, y);
+    dest[1] = get_point(src, rows, cols, x, y);
+    // pick two items to the right
+    dest[2] = get_point(src, rows, cols, x + 1, y);
+    dest[3] = get_point(src, rows, cols, x + 2, y);
+}
+
+// src is rows*cols and dest is a 16-point array passed in already allocated!
+void get_adjacents_2d(float* src, float* dest, uint8_t rows, uint8_t cols, int8_t x, int8_t y) {
+    // Serial.print("("); Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println(")");
+    float arr[4];
+    for (int8_t delta_y = -1; delta_y < 3; delta_y++) { // -1, 0, 1, 2
+        float* row = dest + 4 * (delta_y + 1); // index into each chunk of 4
+        for (int8_t delta_x = -1; delta_x < 3; delta_x++) { // -1, 0, 1, 2
+            row[delta_x + 1] = get_point(src, rows, cols, x + delta_x, y + delta_y);
+        }
+    }
+}
+
 
 m_generic_make(amg8833_thermal)
 {
@@ -155,141 +176,51 @@ m_generic_make(amg8833_thermal)
     return self;
 }
 
+
 mp_obj_t amg8833_thermal_read_pixel_temperature(size_t n_args, const mp_obj_t *args)
 {
     abstract_module_t *self = (abstract_module_t *)args[0];
 
-    if (!mp_obj_is_type(args[1], &mp_type_list))
-    {
-        return mp_const_none;
-        mp_raise_TypeError("expected list");
-    }
-    mp_obj_list_t *data = MP_OBJ_TO_PTR(args[1]);
-
-    float *buff = (float *)m_malloc(data->len * sizeof(float));
+    float *buff = (float *)m_malloc(64* sizeof(float));
+    mp_obj_t *ret_val = (mp_obj_t *)m_malloc(64* sizeof(mp_obj_t));
 
     common_hal_amg8833_thermal_read_pixel_temperature(self, buff);
 
-    for (int i = 0; i < data->len; i++)
+    for (int i = 0; i < 64; i++)
     {
-        data->items[i] = mp_obj_new_float(buff[i]);
+        ret_val[i] = mp_obj_new_float(buff[i]);
     }
+    mp_obj_t ret = mp_obj_new_tuple(64, ret_val);
     m_free(buff);
-
-    return mp_const_none;
+    m_free(ret_val);
+    return ret;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_read_pixel_temperature_obj, 2, 2, amg8833_thermal_read_pixel_temperature);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_read_pixel_temperature_obj, 1, 1, amg8833_thermal_read_pixel_temperature);
 
-mp_obj_t amg8833_thermal_form_image(size_t n_args, const mp_obj_t *args)
+mp_obj_t amg8833_thermal_read_pixel_temperature_scale(size_t n_args, const mp_obj_t *args)
 {
     abstract_module_t *self = (abstract_module_t *)args[0];
+    mp_obj_list_t *data = MP_OBJ_TO_PTR(args[1]);
+    int width = mp_obj_get_int(args[2]);
+    int height = mp_obj_get_int(args[3]);
+    float *dest = (float *)m_malloc(width*height*sizeof(float));
+    float *src = (float *)m_malloc(64* sizeof(float));
+    common_hal_amg8833_thermal_read_pixel_temperature(self, src);
 
-    Getabcd();
+    //mp_obj_t *ret_val = (mp_obj_t *)m_malloc(width*height*sizeof(mp_obj_t));
+    interpolate_image(src, 8, 8, dest,width, height);
 
-    float *pixels = (float *)m_malloc(64 * sizeof(float));
-
-    common_hal_amg8833_thermal_read_pixel_temperature(self, pixels);
-
-    char *data = (char *)m_malloc(200 * 200);
-    float HDTemp[80][80];
-   
-    for (int row = 0; row < 8; row++)
+    for (int i = 0; i < width*height; i++)
     {
-        for (int col = 0; col < 70; col++)
-        {
-            // get the first array point, then the next
-            // also need to bump by 8 for the subsequent rows
-            int aLow = col / 10 + (row * 8);
-            int aHigh = (col / 10) + 1 + (row * 8);
-            // get the amount to interpolate for each of the 10 columns
-            // here were doing simple linear interpolation mainly to keep performace high and
-            // display is 5-6-5 color palet so fancy interpolation will get lost in low color depth
-            float intPoint = ((pixels[aHigh] - pixels[aLow]) / 10.0);
-            // determine how much to bump each column (basically 0-9)
-            int incr = col % 10;
-            // find the interpolated value
-            float val = (intPoint * incr) + pixels[aLow];
-            // store in the 70 x 70 array
-            // since display is pointing away, reverse row to transpose row data
-            HDTemp[(7 - row) * 10][col] = val;
-        }
+        data->items[i] = mp_obj_new_float(dest[i]);
     }
-
-    // now that we have raw data with 70 columns
-    // interpolate each of the 70 columns
-    // forget Arduino..no where near fast enough..Teensy at > 72 mhz is the starting point
-
-    for (int col = 0; col < 70; col++)
-    {
-        for (int row = 0; row < 70; row++)
-        {
-            // get the first array point, then the next
-            // also need to bump by 8 for the subsequent cols
-            int aLow = (row / 10) * 10;
-            int aHigh = aLow + 10;
-            // get the amount to interpolate for each of the 10 columns
-            // here were doing simple linear interpolation mainly to keep performace high and
-            // display is 5-6-5 color palet so fancy interpolation will get lost in low color depth
-            float intPoint = ((HDTemp[aHigh][col] - HDTemp[aLow][col]) / 10.0);
-            // determine how much to bump each column (basically 0-9)
-            int incr = row % 10;
-            // find the interpolated value
-            float val = (intPoint * incr) + HDTemp[aLow][col];
-            // store in the 70 x 70 array
-            HDTemp[row][col] = val;
-            //printf("%f, ", HDTemp[row][col]);
-        }
-        //printf('\n');
-    }
-
-    // for (int row = 0; row < 70; row++)
-    // {
-    //     for (int col = 0; col < 70; col++)
-    //     {
-    //         printf("%f, ", HDTemp[row][col]);
-    //     }
-    //     printf('\n');
-    // }
-    int BoxWidth = 0;
-    int BoxHeight = 0;
-    // rip through 70 rows
-    for (int row = 0; row < 70; row++)
-    {
-
-        // fast way to draw a non-flicker grid--just make every 10 pixels 2x2 as opposed to 3x3
-        // drawing lines after the grid will just flicker too much
-
-        if ((row % 10 == 9))
-        {
-            BoxWidth = 2;
-        }
-        else
-        {
-            BoxWidth = 3;
-        }
-
-        // then rip through each 70 cols
-        for (int col = 0; col < 70; col++)
-        {
-
-            if ((col % 10 == 9))
-            {
-                BoxHeight = 2;
-            }
-            else
-            {
-                BoxHeight = 3;
-            }
-            fillRect((row * 3) + 15, (col * 3) + 15, BoxWidth, BoxHeight, GetColor(HDTemp[row][col]), (uint8_t *)data);
-        }
-    }
-
-    mp_obj_t str = mp_obj_new_bytes(data, 200 * 200);
-    m_free(pixels);
-    m_free(data);
-    return str;
+    //mp_obj_t ret = mp_obj_new_tuple(width*height, ret_val);
+    m_free(dest);
+    m_free(src);
+    //m_free(ret_val);
+    return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_form_image_obj, 1, 1, amg8833_thermal_form_image);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_read_pixel_temperature_scale_obj, 4, 4, amg8833_thermal_read_pixel_temperature_scale);
 
 const mp_rom_map_elem_t amg8833_thermal_locals_dict_table[] = {
     // instance methods
@@ -297,7 +228,7 @@ const mp_rom_map_elem_t amg8833_thermal_locals_dict_table[] = {
     {MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&default___enter___obj)},
     {MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&amg8833_thermal_obj___exit___obj)},
     {MP_ROM_QSTR(MP_QSTR_read_pixel_temperature), MP_ROM_PTR(&amg8833_thermal_read_pixel_temperature_obj)},
-    {MP_ROM_QSTR(MP_QSTR_form_image), MP_ROM_PTR(&amg8833_thermal_form_image_obj)},
+    {MP_ROM_QSTR(MP_QSTR_read_pixel_temperature_scale), MP_ROM_PTR(&amg8833_thermal_read_pixel_temperature_scale_obj)},
 };
 
 MP_DEFINE_CONST_DICT(amg8833_thermal_locals_dict, amg8833_thermal_locals_dict_table);
