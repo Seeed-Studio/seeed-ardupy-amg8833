@@ -233,13 +233,15 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_read_pixel_temperatur
 
 mp_obj_t amg8833_thermal_set_upper_limit(size_t n_args, const mp_obj_t *args)
 {
-   abstract_module_t *self = (abstract_module_t *)args[0];
+    abstract_module_t *self = (abstract_module_t *)args[0];
     float limit = mp_obj_get_float(args[1]);
-    uint16 tmep = limit%1 / 0.25;
-    tmep &= (limit -  limit%1) << 2;
+    uint8_t decimal = (limit - (int)limit) / 0.25;
+    uint16_t temp = 0;
+    temp |= decimal;
+    temp |= (int)limit << 2;
     uint8_t value[2];
-    value[0] = tmep&0x00FF;
-    value[1] = tmep&0xFF00 << 8;
+    value[0] = temp & 0x00FF;
+    value[1] = temp & 0xFF00 << 8;
     common_hal_amg8833_thermal_set_upper_limit(self, value);
     return mp_const_none;
 }
@@ -249,11 +251,13 @@ mp_obj_t amg8833_thermal_set_lower_limit(size_t n_args, const mp_obj_t *args)
 {
     abstract_module_t *self = (abstract_module_t *)args[0];
     float limit = mp_obj_get_float(args[1]);
-    uint16 tmep = limit%1 / 0.25;
-    tmep &= (limit -  limit%1) << 2;
+    uint8_t decimal = (limit - (int)limit) / 0.25;
+    uint16_t temp = 0;
+    temp |= decimal;
+    temp |= (int)limit << 2;
     uint8_t value[2];
-    value[0] = tmep&0x00FF;
-    value[1] = tmep&0xFF00 << 8;
+    value[0] = temp & 0x00FF;
+    value[1] = temp & 0xFF00 << 8;
     common_hal_amg8833_thermal_set_lower_limit(self, value);
     return mp_const_none;
 }
@@ -265,7 +269,7 @@ mp_obj_t amg8833_thermal_set_hysteresis(size_t n_args, const mp_obj_t *args)
     uint16_t limit = mp_obj_get_int(args[1]);
     uint8_t value[2];
     value[0] = limit & 0xFF00 >> 8;
-    value[1] = limit && 0x00FF;
+    value[1] = limit & 0x00FF;
     common_hal_amg8833_thermal_set_hysteresis(self, value);
     return mp_const_none;
 }
@@ -321,7 +325,7 @@ mp_obj_t amg8833_thermal_read_pixels_interrupt_status(size_t n_args, const mp_ob
 {
     abstract_module_t *self = (abstract_module_t *)args[0];
 
-    uint8_t *buff = (uint8_t *)m_malloc(8*sizeof(uint8_t));
+    uint8_t *buff = (uint8_t *)m_malloc(8 * sizeof(uint8_t));
     mp_obj_t *ret_val = (mp_obj_t *)m_malloc(8 * sizeof(mp_obj_t));
 
     common_hal_amg8833_thermal_read_pixels_interrupt_status(self, buff);
