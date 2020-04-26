@@ -97,4 +97,8 @@ extern "C"
     {
         return Thermal.read_pixel_temperature_reg_value(value);
     }
+    bool common_hal_amg8833_thermal_is_connect(abstract_module_t *self)
+    {
+        return Thermal._isConnect;
+    }
 }
