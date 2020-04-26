@@ -6,6 +6,8 @@ The AGM8833 is a high Precision Infrared Array Sensor based on Advanced MEMS Tec
 
 You can get more information in here [AMG8833](https://github.com/Seeed-Studio/Seeed_AMG8833).
 
+![IRcamera](https://files.seeedstudio.com/wiki/Wio-Terminal/img/IRcamera.gif)
+
 ## How to binding with ArduPy
 - Install [AIP](https://github.com/Seeed-Studio/ardupy-aip)
 - Build firmware with Seeed ArduPy AMG8833
@@ -28,11 +30,11 @@ import time
 
 tft = LCD()
 th = grove_amg8833_thermal()
-spr = Sprite(tft)
+spr = Sprite(tft) #create a buff to show IR data more fast
 
 MinTemp = 25
 MaxTemp = 35
-HDTemp = [0.0]*1600
+
 red = 0
 green = 0
 blue = 0
@@ -42,13 +44,10 @@ b = 0.0
 c = 0.0
 d = 0.0
 
-s = 0
-x = 0
-y = 0
 ShowGrid = -1
 pixels = [0.0]*64
 colors_table = [0]*100
-#HDTemp = [[0.0 for i in range(80)] for i in range(80)]
+HDTemp = [0.0]*1600
 
 def toggleGrid():
     global ShowGrid
@@ -70,7 +69,7 @@ def Getabcd():
     c = MinTemp + (MaxTemp - MinTemp) * 0.4242
     d = MinTemp + (MaxTemp - MinTemp) * 0.8182
 
-
+#function to get color table
 def GetColors():
 
     global colors_table
@@ -82,6 +81,7 @@ def GetColors():
 
     #print(colors_table)
 
+#get colort form color_table
 def GetColor(val):
     if val <= 25.0:
         return 30
@@ -168,6 +168,7 @@ def run():
     tick1 = time.ticks_ms()
     while True:
         spr.fillSprite(spr.color.WHITE)
+        #get a 40*40 list of temperature data
         th.read_pixel_temperature_scale(HDTemp, 40, 40)
 
         #return
