@@ -233,11 +233,13 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_read_pixel_temperatur
 
 mp_obj_t amg8833_thermal_set_upper_limit(size_t n_args, const mp_obj_t *args)
 {
-    abstract_module_t *self = (abstract_module_t *)args[0];
-    uint16_t limit = mp_obj_get_int(args[1]);
+   abstract_module_t *self = (abstract_module_t *)args[0];
+    float limit = mp_obj_get_float(args[1]);
+    uint16 tmep = limit%1 / 0.25;
+    tmep &= (limit -  limit%1) << 2;
     uint8_t value[2];
-    value[0] = limit & 0xFF00 >> 8;
-    value[1] = limit && 0x00FF;
+    value[0] = tmep&0x00FF;
+    value[1] = tmep&0xFF00 << 8;
     common_hal_amg8833_thermal_set_upper_limit(self, value);
     return mp_const_none;
 }
@@ -246,10 +248,12 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(amg8833_thermal_set_upper_limit_obj, 
 mp_obj_t amg8833_thermal_set_lower_limit(size_t n_args, const mp_obj_t *args)
 {
     abstract_module_t *self = (abstract_module_t *)args[0];
-    uint16_t limit = mp_obj_get_int(args[1]);
+    float limit = mp_obj_get_float(args[1]);
+    uint16 tmep = limit%1 / 0.25;
+    tmep &= (limit -  limit%1) << 2;
     uint8_t value[2];
-    value[0] = limit & 0xFF00 >> 8;
-    value[1] = limit && 0x00FF;
+    value[0] = tmep&0x00FF;
+    value[1] = tmep&0xFF00 << 8;
     common_hal_amg8833_thermal_set_lower_limit(self, value);
     return mp_const_none;
 }
