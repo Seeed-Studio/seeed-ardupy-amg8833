@@ -27,7 +27,7 @@
 
 #include "Arduino.h"
 #define private public
-#include "Seeed_AMG8833/Seeed_AMG8833_driver.h"
+#include "Seeed_Arduino_AMG8833/Seeed_AMG8833_driver.h"
 extern "C"
 {
 #include "py/objtype.h"
