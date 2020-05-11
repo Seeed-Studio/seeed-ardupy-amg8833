@@ -252,7 +252,7 @@ thermal.set_hysteresis(100)
 ```
 
 ----
-
+### License
 This software is written by seeed studio<br>
 and is licensed under [The MIT License](http://opensource.org/licenses/mit-license.php). Check License.txt for more information.<br>
 
