@@ -7,6 +7,6 @@
     },
     "dependencies": [{
         "name": "Seeed_Arduino_AMG8833",
-        "url": "https://github.com/Seeed-Studio/Seeed_AMG8833/archive/dev.zip"
+        "url": "https://github.com/Seeed-Studio/Seeed_AMG8833.git"
     }]
 }
